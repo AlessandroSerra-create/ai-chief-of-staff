@@ -1,4 +1,5 @@
 import json
+import os
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -7,8 +8,19 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-CREDENTIALS_FILE = "tidal-cipher-433109-v5-db7b245cc5ba.json"
+CREDENTIALS_FILE = os.environ.get(
+    "GOOGLE_CREDENTIALS_FILE", "tidal-cipher-433109-v5-db7b245cc5ba.json"
+)
 SHEET_ID = "1XjsUv3TD1sF5upiwX29rbmIcueAvvT_TFQBi2Yq4e6g"
+
+
+def get_credentials():
+    """Autentica usando GOOGLE_CREDENTIALS_JSON (env var) o file come fallback."""
+    credentials_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if credentials_json:
+        info = json.loads(credentials_json)
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+    return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
 
 TAB_COLUMNS = {
     "KPI": ["Data", "Novos e-mails enviados", "Follow-ups enviados", "Respostas recebidas", "Ligações efetuadas", "Reuniões agendadas"],
@@ -51,7 +63,7 @@ def normalize_sheet(worksheet, expected_columns):
 
 
 def main():
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+    creds = get_credentials()
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SHEET_ID)
 
