@@ -2,6 +2,7 @@ import json
 import os
 import time
 import traceback
+import httpx
 import anthropic
 from datetime import datetime, timedelta
 
@@ -15,7 +16,6 @@ def carica_dati():
 
 
 def parse_data(s):
-    """Prova a parsare una stringa data in vari formati, ritorna None se fallisce."""
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
         try:
             return datetime.strptime(s.strip(), fmt)
@@ -24,134 +24,79 @@ def parse_data(s):
     return None
 
 
-def estrai_kpi_14_giorni(rows):
-    """Ritorna le righe KPI degli ultimi 14 giorni con almeno un valore numerico."""
-    cutoff = datetime.now() - timedelta(days=14)
-    risultati = []
-    for row in rows:
-        data = parse_data(row.get("Data", ""))
-        if data and data >= cutoff:
-            risultati.append(row)
-    # Ordina per data crescente
+def estrai_kpi_7_giorni(rows):
+    cutoff = datetime.now() - timedelta(days=7)
+    risultati = [
+        r for r in rows
+        if (d := parse_data(r.get("Data", ""))) and d >= cutoff
+    ]
     risultati.sort(key=lambda r: parse_data(r.get("Data", "")) or datetime.min)
     return risultati
 
 
-def estrai_crm_con_note(rows, max_righe=30):
-    """Ritorna le aziende CRM con campo Atualizações non vuoto."""
-    con_note = [
-        r for r in rows
-        if r.get("Atualizações", "").strip()
-    ]
+def estrai_crm_con_note(rows, max_righe=10):
+    con_note = [r for r in rows if r.get("Atualizações", "").strip()]
     return con_note[:max_righe]
 
 
-def estrai_prospect(rows, max_righe=15):
-    """Ritorna i primi N prospect (tutte le righe, non c'è filtro stato esplicito)."""
-    non_vuoti = [
-        r for r in rows
-        if any(v.strip() for v in r.values())
-    ]
-    return non_vuoti[:max_righe]
-
-
 def costruisci_riassunto(dati):
-    righe = []
+    parti = []
 
-    # --- KPI: ultimi 14 giorni ---
     kpi_rows = dati.get("KPI", {}).get("rows", [])
-    kpi_recenti = estrai_kpi_14_giorni(kpi_rows)
-    righe.append("## KPI — Ultimi 14 giorni")
+    kpi_recenti = estrai_kpi_7_giorni(kpi_rows)
+    parti.append("KPI ULTIMI 7 GIORNI:")
     if kpi_recenti:
-        righe.append(f"({len(kpi_recenti)} giorni con dati nel periodo)")
-        righe.append(json.dumps(kpi_recenti, ensure_ascii=False, indent=2))
+        for r in kpi_recenti:
+            parti.append(
+                f"  {r.get('Data','')} | email={r.get('Novos e-mails enviados','')} "
+                f"followup={r.get('Follow-ups enviados','')} "
+                f"risposte={r.get('Respostas recebidas','')} "
+                f"chiamate={r.get('Ligações efetuadas','')} "
+                f"riunioni={r.get('Reuniões agendadas','')}"
+            )
     else:
-        righe.append("Nessun dato KPI negli ultimi 14 giorni.")
-    righe.append("")
+        parti.append("  Nessun dato negli ultimi 7 giorni.")
 
-    # --- CRM: aziende con note ---
     crm_rows = dati.get("CRM", {}).get("rows", [])
-    crm_con_note = estrai_crm_con_note(crm_rows, max_righe=30)
-    righe.append(f"## CRM — Aziende con aggiornamenti ({len(crm_con_note)} su {len(crm_rows)} totali)")
-    if crm_con_note:
-        righe.append(json.dumps(crm_con_note, ensure_ascii=False, indent=2))
-    else:
-        righe.append("Nessuna azienda con note nel CRM.")
-    righe.append("")
+    crm_con_note = estrai_crm_con_note(crm_rows, max_righe=10)
+    parti.append(f"\nCRM TOP 10 CON NOTE (totale aziende: {len(crm_rows)}):")
+    for r in crm_con_note:
+        parti.append(
+            f"  {r.get('Nome da empresa','')} | {r.get('Data do contato','')} | {r.get('Atualizações','')[:80]}"
+        )
 
-    # --- Prospect BRA ---
-    bra_rows = dati.get("BRA - Novos a contactar", {}).get("rows", [])
-    bra_prospect = estrai_prospect(bra_rows, max_righe=15)
-    righe.append(f"## Prospect BRASILE — Primi {len(bra_prospect)} (totale: {len(bra_rows)})")
-    if bra_prospect:
-        righe.append(json.dumps(bra_prospect, ensure_ascii=False, indent=2))
-    else:
-        righe.append("Nessun prospect BRA disponibile.")
-    righe.append("")
-
-    # --- Prospect ARG ---
-    arg_rows = dati.get("ARG - Novos a contactar", {}).get("rows", [])
-    arg_prospect = estrai_prospect(arg_rows, max_righe=15)
-    righe.append(f"## Prospect ARGENTINA — Primi {len(arg_prospect)} (totale: {len(arg_rows)})")
-    if arg_prospect:
-        righe.append(json.dumps(arg_prospect, ensure_ascii=False, indent=2))
-    else:
-        righe.append("Nessun prospect ARG disponibile.")
-    righe.append("")
-
-    return "\n".join(righe)
+    riassunto = "\n".join(parti)
+    return riassunto[:2000]
 
 
 def genera_report(riassunto):
-    system_prompt = """Sei un analista commerciale esperto. Analizza i dati forniti da un CRM e un tracker KPI di un team di vendita B2B e produci un report manageriale chiaro, sintetico e utile, scritto in italiano formale.
+    http_client = httpx.Client(timeout=httpx.Timeout(None, connect=15.0))
+    client = anthropic.Anthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        http_client=http_client,
+    )
 
-Il report deve avere esattamente queste 4 sezioni:
-
-1. RIEPILOGO ATTIVITÀ COMMERCIALE (ultimi 14 giorni)
-   - Trend: email, follow-up, risposte, chiamate, riunioni giorno per giorno
-   - Medie giornaliere e settimanali
-   - Anomalie: giorni a zero, picchi, buchi di dati
-
-2. STATO PIPELINE CRM
-   - Pattern ricorrenti nelle note (settori, obiezioni, interesse, stadio trattativa)
-   - Aziende da prioritizzare subito (segnali positivi nelle note)
-   - Aziende ferme da riattivare (note vecchie o assenti)
-
-3. PROSPECT DA CONTATTARE
-   - Brasile: top 5 con motivazione specifica per ognuno
-   - Argentina: top 5 con motivazione specifica per ognuno
-   - Criteri usati per la prioritizzazione
-
-4. ALERT CRITICI PER IL CEO
-   - Cali significativi di attività
-   - Buchi di dati o KPI non compilati
-   - Situazioni commerciali che richiedono attenzione immediata
-
-Usa un tono diretto e operativo. Includi numeri specifici. Sii conciso ma completo."""
-
-    user_message = f"""Ecco il riassunto dei dati estratti dal Google Sheet aziendale (KPI ultimi 14 giorni, CRM con note, prospect BRA e ARG):
-
-{riassunto}
-
-Genera il report manageriale completo seguendo le 4 sezioni indicate."""
-
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    prompt = f"""Sei un analista commerciale. Genera un report manageriale in italiano con 4 sezioni:
+1. RIEPILOGO KPI (trend 7 giorni, medie, anomalie)
+2. PIPELINE CRM (pattern note, priorità, aziende ferme)
+3. PROSPECT (chi contattare e perché)
+4. ALERT CEO (cali, buchi dati, urgenze)
+Sii conciso. Dati: {riassunto}"""
 
     max_tentativi = 3
     attesa = 5
 
     for tentativo in range(1, max_tentativi + 1):
         try:
-            print(f"Generazione report in corso (tentativo {tentativo}/{max_tentativi})...", flush=True)
+            print(f"Generazione report (tentativo {tentativo}/{max_tentativi})...", flush=True)
 
-            with client.messages.stream(
+            risposta = client.messages.create(
                 model=MODEL,
-                max_tokens=1000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            ) as stream:
-                testo = stream.get_final_text()
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
 
+            testo = risposta.content[0].text
             print(testo, flush=True)
             return testo
 
@@ -175,11 +120,10 @@ def salva_report(testo):
         f"{'=' * 60}\n\n"
     )
     contenuto = intestazione + testo
-
     for nome in ("report_ultimo.txt", f"report_{timestamp}.txt"):
         with open(nome, "w", encoding="utf-8") as f:
             f.write(contenuto)
-        print(f"Salvato: {nome}")
+        print(f"Salvato: {nome}", flush=True)
 
 
 def main():
@@ -187,14 +131,14 @@ def main():
         print("ERRORE: ANTHROPIC_API_KEY non impostata.")
         return
 
-    print(f"Lettura {JSON_FILE}...")
+    print(f"Lettura {JSON_FILE}...", flush=True)
     dati = carica_dati()
     for tab, contenuto in dati.items():
         print(f"  [{tab}] {len(contenuto.get('rows', []))} righe")
 
-    print("\nCostruzione riassunto intelligente...")
+    print("\nCostruzione riassunto...", flush=True)
     riassunto = costruisci_riassunto(dati)
-    print(f"Riassunto: {len(riassunto)} caratteri\n")
+    print(f"Riassunto: {len(riassunto)} caratteri\n", flush=True)
 
     testo_report = genera_report(riassunto)
     salva_report(testo_report)

@@ -1,4 +1,6 @@
+anthropic==0.25.0
+httpx==0.24.1
 gspread
 google-auth
-anthropic
 schedule
+requests
