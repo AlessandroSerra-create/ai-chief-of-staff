@@ -1,5 +1,8 @@
 import json
 import os
+import time
+import traceback
+import httpx
 import anthropic
 from datetime import datetime, timedelta
 
@@ -101,7 +104,13 @@ def costruisci_riassunto(dati):
 
 
 def genera_report(riassunto):
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    http_client = httpx.Client(
+        timeout=httpx.Timeout(30.0, connect=10.0),
+    )
+    client = anthropic.Anthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        http_client=http_client,
+    )
 
     system_prompt = """Sei un analista commerciale esperto. Analizza i dati forniti da un CRM e un tracker KPI di un team di vendita B2B e produci un report manageriale chiaro, sintetico e utile, scritto in italiano formale.
 
@@ -135,22 +144,36 @@ Usa un tono diretto e operativo. Includi numeri specifici. Sii conciso ma comple
 
 Genera il report manageriale completo seguendo le 4 sezioni indicate."""
 
-    print("Generazione report in corso...", flush=True)
+    max_tentativi = 3
+    attesa = 5
 
-    with client.messages.stream(
-        model=MODEL,
-        max_tokens=4096,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-        timeout=120,
-    ) as stream:
-        testo = ""
-        for chunk in stream.text_stream:
-            print(chunk, end="", flush=True)
-            testo += chunk
+    for tentativo in range(1, max_tentativi + 1):
+        try:
+            print(f"Generazione report in corso (tentativo {tentativo}/{max_tentativi})...", flush=True)
 
-    print("\n")
-    return testo
+            with client.messages.stream(
+                model=MODEL,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            ) as stream:
+                testo = ""
+                for chunk in stream.text_stream:
+                    print(chunk, end="", flush=True)
+                    testo += chunk
+
+            print("\n")
+            return testo
+
+        except Exception as e:
+            print(f"\nERRORE tentativo {tentativo}/{max_tentativi}: {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
+            if tentativo < max_tentativi:
+                print(f"Nuovo tentativo tra {attesa} secondi...", flush=True)
+                time.sleep(attesa)
+            else:
+                print("Tutti i tentativi esauriti. Interruzione.", flush=True)
+                raise
 
 
 def salva_report(testo):
