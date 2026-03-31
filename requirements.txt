@@ -2,4 +2,3 @@ gspread
 google-auth
 anthropic
 schedule
-requests

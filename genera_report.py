@@ -2,7 +2,7 @@ import json
 import os
 import time
 import traceback
-import requests
+import anthropic
 from datetime import datetime, timedelta
 
 JSON_FILE = "dati_canonici.json"
@@ -103,8 +103,6 @@ def costruisci_riassunto(dati):
 
 
 def genera_report(riassunto):
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-
     system_prompt = """Sei un analista commerciale esperto. Analizza i dati forniti da un CRM e un tracker KPI di un team di vendita B2B e produci un report manageriale chiaro, sintetico e utile, scritto in italiano formale.
 
 Il report deve avere esattamente queste 4 sezioni:
@@ -137,17 +135,7 @@ Usa un tono diretto e operativo. Includi numeri specifici. Sii conciso ma comple
 
 Genera il report manageriale completo seguendo le 4 sezioni indicate."""
 
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    body = {
-        "model": MODEL,
-        "max_tokens": 1500,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_message}],
-    }
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
     max_tentativi = 3
     attesa = 5
@@ -156,19 +144,14 @@ Genera il report manageriale completo seguendo le 4 sezioni indicate."""
         try:
             print(f"Generazione report in corso (tentativo {tentativo}/{max_tentativi})...", flush=True)
 
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=body,
-                timeout=60,
-            )
+            with client.messages.stream(
+                model=MODEL,
+                max_tokens=1000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            ) as stream:
+                testo = stream.get_final_text()
 
-            print(f"HTTP status: {resp.status_code}", flush=True)
-            print(f"Risposta (primi 200 char): {resp.text[:200]}", flush=True)
-
-            resp.raise_for_status()
-            data = resp.json()
-            testo = data["content"][0]["text"]
             print(testo, flush=True)
             return testo
 
