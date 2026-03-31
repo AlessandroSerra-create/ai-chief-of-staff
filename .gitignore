@@ -1,0 +1,22 @@
+# Credenziali e segreti
+tidal-cipher-433109-v5-db7b245cc5ba.json
+*.json.key
+.env
+
+# Dati generati automaticamente
+dati_canonici.json
+report_ultimo.txt
+report_*.txt
+log.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
