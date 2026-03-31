@@ -29,7 +29,7 @@ def costruisci_contesto(dati):
 
 
 def genera_report(contesto):
-    client = anthropic.Anthropic()  # usa ANTHROPIC_API_KEY dall'ambiente
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
     system_prompt = """Sei un analista commerciale esperto. Analizza i dati forniti da un CRM e un tracker KPI di un team di vendita B2B e produci un report manageriale chiaro, sintetico e utile, scritto in italiano formale.
 
