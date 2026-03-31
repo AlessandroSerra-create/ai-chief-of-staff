@@ -1,7 +1,7 @@
 import json
 import os
 import anthropic
-from datetime import datetime
+from datetime import datetime, timedelta
 
 JSON_FILE = "dati_canonici.json"
 MODEL = "claude-opus-4-5"
@@ -12,62 +12,137 @@ def carica_dati():
         return json.load(f)
 
 
-def costruisci_contesto(dati):
-    sezioni = []
-    for tab, contenuto in dati.items():
-        headers = contenuto.get("headers", [])
-        rows = contenuto.get("rows", [])
-        sezioni.append(f"### Foglio: {tab}")
-        sezioni.append(f"Colonne: {', '.join(headers)}")
-        sezioni.append(f"Numero di righe: {len(rows)}")
-        # Include tutte le righe (il modello ha contesto ampio)
-        if rows:
-            sample = json.dumps(rows, ensure_ascii=False, indent=2)
-            sezioni.append(f"Dati:\n{sample}")
-        sezioni.append("")
-    return "\n".join(sezioni)
+def parse_data(s):
+    """Prova a parsare una stringa data in vari formati, ritorna None se fallisce."""
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s.strip(), fmt)
+        except ValueError:
+            continue
+    return None
 
 
-def genera_report(contesto):
+def estrai_kpi_14_giorni(rows):
+    """Ritorna le righe KPI degli ultimi 14 giorni con almeno un valore numerico."""
+    cutoff = datetime.now() - timedelta(days=14)
+    risultati = []
+    for row in rows:
+        data = parse_data(row.get("Data", ""))
+        if data and data >= cutoff:
+            risultati.append(row)
+    # Ordina per data crescente
+    risultati.sort(key=lambda r: parse_data(r.get("Data", "")) or datetime.min)
+    return risultati
+
+
+def estrai_crm_con_note(rows, max_righe=30):
+    """Ritorna le aziende CRM con campo Atualizações non vuoto."""
+    con_note = [
+        r for r in rows
+        if r.get("Atualizações", "").strip()
+    ]
+    return con_note[:max_righe]
+
+
+def estrai_prospect(rows, max_righe=15):
+    """Ritorna i primi N prospect (tutte le righe, non c'è filtro stato esplicito)."""
+    non_vuoti = [
+        r for r in rows
+        if any(v.strip() for v in r.values())
+    ]
+    return non_vuoti[:max_righe]
+
+
+def costruisci_riassunto(dati):
+    righe = []
+
+    # --- KPI: ultimi 14 giorni ---
+    kpi_rows = dati.get("KPI", {}).get("rows", [])
+    kpi_recenti = estrai_kpi_14_giorni(kpi_rows)
+    righe.append("## KPI — Ultimi 14 giorni")
+    if kpi_recenti:
+        righe.append(f"({len(kpi_recenti)} giorni con dati nel periodo)")
+        righe.append(json.dumps(kpi_recenti, ensure_ascii=False, indent=2))
+    else:
+        righe.append("Nessun dato KPI negli ultimi 14 giorni.")
+    righe.append("")
+
+    # --- CRM: aziende con note ---
+    crm_rows = dati.get("CRM", {}).get("rows", [])
+    crm_con_note = estrai_crm_con_note(crm_rows, max_righe=30)
+    righe.append(f"## CRM — Aziende con aggiornamenti ({len(crm_con_note)} su {len(crm_rows)} totali)")
+    if crm_con_note:
+        righe.append(json.dumps(crm_con_note, ensure_ascii=False, indent=2))
+    else:
+        righe.append("Nessuna azienda con note nel CRM.")
+    righe.append("")
+
+    # --- Prospect BRA ---
+    bra_rows = dati.get("BRA - Novos a contactar", {}).get("rows", [])
+    bra_prospect = estrai_prospect(bra_rows, max_righe=15)
+    righe.append(f"## Prospect BRASILE — Primi {len(bra_prospect)} (totale: {len(bra_rows)})")
+    if bra_prospect:
+        righe.append(json.dumps(bra_prospect, ensure_ascii=False, indent=2))
+    else:
+        righe.append("Nessun prospect BRA disponibile.")
+    righe.append("")
+
+    # --- Prospect ARG ---
+    arg_rows = dati.get("ARG - Novos a contactar", {}).get("rows", [])
+    arg_prospect = estrai_prospect(arg_rows, max_righe=15)
+    righe.append(f"## Prospect ARGENTINA — Primi {len(arg_prospect)} (totale: {len(arg_rows)})")
+    if arg_prospect:
+        righe.append(json.dumps(arg_prospect, ensure_ascii=False, indent=2))
+    else:
+        righe.append("Nessun prospect ARG disponibile.")
+    righe.append("")
+
+    return "\n".join(righe)
+
+
+def genera_report(riassunto):
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
     system_prompt = """Sei un analista commerciale esperto. Analizza i dati forniti da un CRM e un tracker KPI di un team di vendita B2B e produci un report manageriale chiaro, sintetico e utile, scritto in italiano formale.
 
-Il report deve essere strutturato con queste esatte sezioni:
-1. RIEPILOGO ATTIVITÀ COMMERCIALE ULTIMA SETTIMANA
-   - Analizza i KPI più recenti: email inviate, follow-up, risposte ricevute, chiamate, riunioni
-   - Confronta con periodi precedenti se possibile, evidenzia trend
+Il report deve avere esattamente queste 4 sezioni:
+
+1. RIEPILOGO ATTIVITÀ COMMERCIALE (ultimi 14 giorni)
+   - Trend: email, follow-up, risposte, chiamate, riunioni giorno per giorno
+   - Medie giornaliere e settimanali
+   - Anomalie: giorni a zero, picchi, buchi di dati
 
 2. STATO PIPELINE CRM
-   - Quante aziende sono state contattate totale e nell'ultima settimana
-   - Quante sono in attesa di risposta / follow-up
-   - Pattern ricorrenti nelle note/aggiornamenti (es. settori, obiezioni, interesse)
+   - Pattern ricorrenti nelle note (settori, obiezioni, interesse, stadio trattativa)
+   - Aziende da prioritizzare subito (segnali positivi nelle note)
+   - Aziende ferme da riattivare (note vecchie o assenti)
 
-3. PROSPECT DA PRIORITIZZARE — BRASILE E ARGENTINA
-   - Elenca i prospect più promettenti per BRA e ARG separatamente
-   - Evidenzia quelli senza contatti recenti o con segnali positivi
-   - Suggerisci azioni concrete per i top 3-5 per paese
+3. PROSPECT DA CONTATTARE
+   - Brasile: top 5 con motivazione specifica per ognuno
+   - Argentina: top 5 con motivazione specifica per ognuno
+   - Criteri usati per la prioritizzazione
 
-4. ALERT — ANOMALIE O CALI DI ATTIVITÀ
-   - Identifica settimane o periodi con calo significativo
-   - Segnala aziende nel CRM che non vengono aggiornate da tempo
-   - Evidenzia eventuali anomalie nei dati (valori mancanti, attività zero, ecc.)
+4. ALERT CRITICI PER IL CEO
+   - Cali significativi di attività
+   - Buchi di dati o KPI non compilati
+   - Situazioni commerciali che richiedono attenzione immediata
 
-Usa un tono diretto e operativo. Includi numeri specifici dove disponibili."""
+Usa un tono diretto e operativo. Includi numeri specifici. Sii conciso ma completo."""
 
-    user_message = f"""Ecco i dati completi estratti dal Google Sheet aziendale. Analizzali e genera il report manageriale richiesto.
+    user_message = f"""Ecco il riassunto dei dati estratti dal Google Sheet aziendale (KPI ultimi 14 giorni, CRM con note, prospect BRA e ARG):
 
-{contesto}
+{riassunto}
 
-Genera ora il report manageriale completo seguendo le 4 sezioni indicate."""
+Genera il report manageriale completo seguendo le 4 sezioni indicate."""
 
-    print("Generazione del report in corso (streaming)...")
+    print("Generazione report in corso...", flush=True)
 
     with client.messages.stream(
         model=MODEL,
         max_tokens=4096,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
+        timeout=120,
     ) as stream:
         testo = ""
         for chunk in stream.text_stream:
@@ -80,49 +155,35 @@ Genera ora il report manageriale completo seguendo le 4 sezioni indicate."""
 
 def salva_report(testo):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    nome_file = f"report_ultimo.txt"
-    nome_file_ts = f"report_{timestamp}.txt"
-
     intestazione = (
         f"REPORT COMMERCIALE MANAGERIALE\n"
         f"Generato il: {datetime.now().strftime('%d/%m/%Y alle %H:%M:%S')}\n"
         f"Modello: {MODEL}\n"
         f"{'=' * 60}\n\n"
     )
-
     contenuto = intestazione + testo
 
-    # Salva come report_ultimo.txt (sovrascrive sempre)
-    with open(nome_file, "w", encoding="utf-8") as f:
-        f.write(contenuto)
-
-    # Salva anche una copia con timestamp
-    with open(nome_file_ts, "w", encoding="utf-8") as f:
-        f.write(contenuto)
-
-    print(f"Report salvato come: {nome_file}")
-    print(f"Copia con timestamp: {nome_file_ts}")
-    return nome_file
+    for nome in ("report_ultimo.txt", f"report_{timestamp}.txt"):
+        with open(nome, "w", encoding="utf-8") as f:
+            f.write(contenuto)
+        print(f"Salvato: {nome}")
 
 
 def main():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERRORE: variabile d'ambiente ANTHROPIC_API_KEY non impostata.")
-        print("Esegui: export ANTHROPIC_API_KEY='la-tua-chiave'")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ERRORE: ANTHROPIC_API_KEY non impostata.")
         return
 
-    print(f"Lettura dati da {JSON_FILE}...")
+    print(f"Lettura {JSON_FILE}...")
     dati = carica_dati()
-
     for tab, contenuto in dati.items():
         print(f"  [{tab}] {len(contenuto.get('rows', []))} righe")
 
-    print("\nCostruzione del contesto per il modello...")
-    contesto = costruisci_contesto(dati)
-    print(f"Contesto generato: {len(contesto)} caratteri\n")
+    print("\nCostruzione riassunto intelligente...")
+    riassunto = costruisci_riassunto(dati)
+    print(f"Riassunto: {len(riassunto)} caratteri\n")
 
-    testo_report = genera_report(contesto)
+    testo_report = genera_report(riassunto)
     salva_report(testo_report)
 
 
