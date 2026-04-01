@@ -71,16 +71,34 @@ def main():
     canonical = {}
     row_counts = {}
 
+    KPI_NUMERIC_COLS = [
+        "Novos e-mails enviados",
+        "Follow-ups enviados",
+        "Respostas recebidas",
+        "Ligações efetuadas",
+        "Reuniões agendadas",
+    ]
+
     for tab_name, expected_columns in TAB_COLUMNS.items():
         try:
             worksheet = spreadsheet.worksheet(tab_name)
             headers, rows = normalize_sheet(worksheet, expected_columns)
+
+            if tab_name == "KPI":
+                filtered = [
+                    r for r in rows
+                    if any(r.get(col, "").strip() not in ("", "0") for col in KPI_NUMERIC_COLS)
+                ]
+                rows = filtered[-14:]
+                print(f"  [KPI] {len(rows)} righe reali (dopo filtro su colonne B-F)")
+
             canonical[tab_name] = {
                 "headers": headers,
                 "rows": rows,
             }
             row_counts[tab_name] = len(rows)
-            print(f"  [{tab_name}] {len(rows)} righe lette")
+            if tab_name != "KPI":
+                print(f"  [{tab_name}] {len(rows)} righe lette")
         except gspread.exceptions.WorksheetNotFound:
             print(f"  [{tab_name}] FOGLIO NON TROVATO")
             canonical[tab_name] = {"headers": [], "rows": []}
