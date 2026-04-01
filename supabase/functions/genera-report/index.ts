@@ -22,8 +22,8 @@ Deno.serve(async (req) => {
     const payload = rows[0].payload;
 
     // 2. Costruisci prompt compatto
-    const kpi_recenti = payload.KPI?.slice(-7) ?? [];
-    const crm_top = (payload.CRM ?? []).filter((r: any) => r.Note).slice(0, 15);
+    const kpi_recenti = payload.KPI?.rows?.slice(-7) ?? [];
+    const crm_top = (payload.CRM?.rows ?? []).filter((r: any) => r.Note).slice(0, 15);
     const prompt = `Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.
 
 KPI ultimi 7 giorni:
