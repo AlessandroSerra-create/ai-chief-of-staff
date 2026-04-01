@@ -3,7 +3,11 @@ import schedule
 import time
 import json
 import os
+import requests
 from datetime import datetime, timedelta
+
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+GENERA_REPORT_URL = "https://xnduljfrfmyaxyjhrsfk.supabase.co/functions/v1/genera-report"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "log.txt")
@@ -36,13 +40,31 @@ def esegui_script(nome_script):
     return result.returncode == 0
 
 
+def chiama_genera_report():
+    try:
+        log("Chiamata Edge Function genera-report...")
+        res = requests.post(
+            GENERA_REPORT_URL,
+            headers={
+                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={},
+            timeout=60,
+        )
+        log(f"genera-report: status {res.status_code}")
+    except Exception as e:
+        log(f"ERRORE genera-report: {e}")
+
+
 def aggiorna_dati_e_report():
     log("=== CICLO ORARIO: aggiornamento dati e report ===")
     ok = esegui_script("leggi_sheet.py")
     if ok:
         esegui_script("salva_su_supabase.py")
+        chiama_genera_report()
     else:
-        log("Salvataggio Supabase saltato a causa di errore in leggi_sheet.py.")
+        log("Salvataggio Supabase e genera-report saltati a causa di errore in leggi_sheet.py.")
     log("=== CICLO ORARIO completato ===")
 
 
