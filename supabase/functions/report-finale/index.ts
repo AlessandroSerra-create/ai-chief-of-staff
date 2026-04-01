@@ -27,6 +27,24 @@ Deno.serve(async (req) => {
         .map(([fonte, testo]) => `## ${fonte.toUpperCase()}\n${testo}`)
         .join("\n\n");
 
+      // Recupera configurazione cliente
+      let configContext = "";
+      try {
+        const configRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/configurazioni?cliente=eq.${cliente}&limit=1`,
+          { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
+        );
+        const configRows = await configRes.json();
+        if (configRows.length) {
+          const config = configRows[0];
+          const focusList = Array.isArray(config.focus) ? config.focus.join(", ") : (config.focus ?? "");
+          const istruzione = config.istruzione_custom ?? "";
+          if (focusList || istruzione) {
+            configContext = `FOCUS RICHIESTO DAL CEO: ${focusList}\nISTRUZIONE PERSONALIZZATA: ${istruzione}\nPrioritizza questi aspetti nell'analisi e nelle raccomandazioni.\n\n`;
+          }
+        }
+      } catch (_) { /* non bloccante */ }
+
       // Recupera contesto temporale dal canonical_data più recente
       let temporalContext = "";
       try {
@@ -50,7 +68,7 @@ Deno.serve(async (req) => {
         }
       } catch (_) { /* non bloccante */ }
 
-      const prompt = `${temporalContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale di 200-250 parole in italiano che risponde direttamente alla richiesta del CEO. Indica 3 azioni concrete da intraprendere nelle prossime 48 ore. Tono diretto, manageriale.`;
+      const prompt = `${temporalContext}${configContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale di 200-250 parole in italiano che risponde direttamente alla richiesta del CEO. Indica 3 azioni concrete da intraprendere nelle prossime 48 ore. Tono diretto, manageriale.`;
 
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
