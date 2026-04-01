@@ -1,20 +1,24 @@
-import json
-import os
+import requests, json, os
 from datetime import datetime
-from supabase import create_client, Client
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-JSON_FILE = os.path.join(BASE_DIR, "dati_canonici.json")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-
-with open(JSON_FILE, "r", encoding="utf-8") as f:
+with open("dati_canonici.json") as f:
     dati = json.load(f)
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+headers = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
-response = supabase.table("dati_canonici").insert({"cliente": "aloe-vera-pilot", "payload": dati}).execute()
+response = requests.post(
+    f"{SUPABASE_URL}/rest/v1/dati_canonici",
+    headers=headers,
+    json={"cliente": "aloe-vera-pilot", "payload": dati},
+    timeout=30
+)
 
-ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-print(f"[{ts}] Dati salvati su Supabase (cliente=aloe-vera-pilot).")
+print(f"[{datetime.now()}] Supabase status: {response.status_code}")
+print(response.text[:200])

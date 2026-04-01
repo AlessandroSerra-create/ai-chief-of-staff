@@ -4,4 +4,3 @@ gspread
 google-auth
 schedule
 requests
-supabase==2.3.0
