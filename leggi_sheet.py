@@ -2,6 +2,7 @@ import json
 import os
 import requests
 import gspread
+from datetime import date
 from google.oauth2.service_account import Credentials
 
 SCOPES = [
@@ -91,6 +92,16 @@ def main():
                 ]
                 rows = filtered[-14:]
                 print(f"  [KPI] {len(rows)} righe reali (dopo filtro su colonne B-F)")
+
+                # Trova la data più recente tra le righe filtrate
+                ultima_data_kpi = ""
+                for r in reversed(rows):
+                    d = r.get("Data", "").strip()
+                    if d:
+                        ultima_data_kpi = d
+                        break
+                canonical["ultima_data_kpi"] = ultima_data_kpi
+                canonical["data_oggi"] = date.today().strftime("%d/%m/%Y")
 
             canonical[tab_name] = {
                 "headers": headers,
