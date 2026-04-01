@@ -59,7 +59,7 @@ Scrivi un report manageriale in italiano di 150-200 parole. Identifica trend, se
         Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ cliente: "aloe-vera-pilot", testo }),
+      body: JSON.stringify({ cliente: "aloe-vera-pilot", report_testo: testo }),
     });
 
     return new Response(JSON.stringify({ ok: true, report: testo }), {
