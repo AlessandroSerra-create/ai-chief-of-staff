@@ -40,9 +40,9 @@ def aggiorna_dati_e_report():
     log("=== CICLO ORARIO: aggiornamento dati e report ===")
     ok = esegui_script("leggi_sheet.py")
     if ok:
-        esegui_script("genera_report.py")
+        esegui_script("salva_su_supabase.py")
     else:
-        log("Aggiornamento report saltato a causa di errore in leggi_sheet.py.")
+        log("Salvataggio Supabase saltato a causa di errore in leggi_sheet.py.")
     log("=== CICLO ORARIO completato ===")
 
 
@@ -101,7 +101,7 @@ def controlla_kpi_ieri():
 def main():
     log("========================================")
     log("Scheduler avviato.")
-    log("Ciclo orario: leggi_sheet.py + genera_report.py")
+    log("Ciclo orario: leggi_sheet.py + salva_su_supabase.py")
     log("Controllo KPI giornaliero: ogni giorno alle 09:00")
     log("========================================")
 
