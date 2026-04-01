@@ -1,5 +1,6 @@
 import json
 import os
+import requests
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -89,6 +90,23 @@ def main():
         json.dump(canonical, f, ensure_ascii=False, indent=2)
 
     print("\nFile salvato: dati_canonici.json")
+
+    try:
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        response = requests.post(
+            "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+            },
+            json={"cliente": "aloe-vera-pilot", "payload": canonical},
+            timeout=15,
+        )
+        print(f"Supabase canonical_data: {response.status_code}")
+    except Exception as e:
+        print(f"ERRORE salvataggio Supabase: {e}")
+
     return row_counts
 
 
