@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
 
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/reports?order=generato_at.desc&limit=1&select=testo,generato_at`,
+      `${SUPABASE_URL}/rest/v1/reports?fonte=eq.finale&order=created_at.desc&limit=1&select=testo,created_at`,
       {
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         report: rows[0].testo,
-        generato_at: rows[0].generato_at,
+        generato_at: rows[0].created_at,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
