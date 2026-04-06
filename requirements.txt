@@ -4,3 +4,9 @@ gspread
 google-auth
 schedule
 requests
+fastapi
+uvicorn
+passlib[bcrypt]
+python-jose[cryptography]
+asyncpg
+python-multipart
