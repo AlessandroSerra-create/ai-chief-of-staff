@@ -1,13 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from passlib.context import CryptContext
+import bcrypt
 from jose import jwt
 from datetime import datetime, timedelta
 import os
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "cambia-questa-chiave-in-produzione")
 ALGORITHM = "HS256"
@@ -17,11 +16,11 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
-def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
-def hash_password(password):
-    return pwd_context.hash(password)
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def create_token(data: dict):
     payload = data.copy()
