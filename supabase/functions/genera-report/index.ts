@@ -56,7 +56,12 @@ Deno.serve(async (req) => {
     const reportProspect = await callClaude(`Sei il Chief of Staff AI. Analizza questi prospect per Brasile e Argentina e scrivi un report di 100 parole in italiano. Identifica priorità di contatto. Tono diretto.\n\nBRASILE:\n${JSON.stringify(bra, null, 2)}\n\nARGENTINA:\n${JSON.stringify(arg, null, 2)}`);
     await salvaReport(cliente, "prospect", reportProspect);
 
-    return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect"] }), {
+    // Report Gmail
+    const gmail = payload.gmail ?? {};
+    const reportGmail = await callClaude(`Sei un assistente che analizza le comunicazioni email di un'azienda.\nAnalizza questi thread email e produci un report conciso con:\n- Con chi sta comunicando ogni casella (esterni vs interni)\n- I principali argomenti delle conversazioni in corso\n- Eventuali email che sembrano urgenti o importanti\nDati: ${JSON.stringify(gmail, null, 2)}`);
+    await salvaReport(cliente, "gmail", reportGmail);
+
+    return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", "gmail"] }), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
