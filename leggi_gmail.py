@@ -109,14 +109,32 @@ def main():
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if supabase_key:
         try:
-            response = req.post(
-                "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data",
+            # 1. Leggi il payload esistente
+            get_resp = req.get(
+                "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot&select=payload",
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                },
+                timeout=15,
+            )
+            existing_payload = {}
+            if get_resp.status_code == 200 and get_resp.json():
+                existing_payload = get_resp.json()[0].get("payload", {}) or {}
+
+            # 2. Merge: aggiorna solo il campo gmail
+            existing_payload["gmail"] = canonical
+
+            # 3. PATCH (upsert) sul record esistente
+            response = req.patch(
+                "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot",
                 headers={
                     "apikey": supabase_key,
                     "Authorization": f"Bearer {supabase_key}",
                     "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
                 },
-                json={"cliente": "aloe-vera-pilot", "payload": {"gmail": canonical}},
+                json={"payload": existing_payload},
                 timeout=15,
             )
             print(f"Supabase gmail: {response.status_code}")
