@@ -60,6 +60,7 @@ def chiama_genera_report():
 def aggiorna_dati_e_report():
     log("=== CICLO ORARIO: aggiornamento dati e report ===")
     ok = esegui_script("leggi_sheet.py")
+    esegui_script("leggi_gmail.py")
     if ok:
         esegui_script("salva_su_supabase.py")
         chiama_genera_report()
