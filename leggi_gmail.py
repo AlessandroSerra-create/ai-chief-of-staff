@@ -18,6 +18,9 @@ CASELLE = [
 
 def get_service(email):
     token_file = f'gmail_token_{email.replace("@","_").replace(".","_")}.json'
+    if not os.path.exists(token_file) and os.environ.get("GMAIL_TOKEN_SERRA"):
+        with open(token_file, 'w') as f:
+            f.write(os.environ["GMAIL_TOKEN_SERRA"])
     creds = None
     if os.path.exists(token_file):
         creds = Credentials.from_authorized_user_file(token_file, SCOPES)
