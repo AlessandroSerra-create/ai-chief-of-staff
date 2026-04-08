@@ -77,12 +77,12 @@ Deno.serve(async (req) => {
       }
     } catch (_) {}
 
-    const prompt = `${temporalContext}${configContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nREGOLA CRITICA: Riporta SOLO informazioni esplicitamente presenti nei dati forniti. Non fare inferenze, non aggiungere contesto esterno, non ipotizzare. Se un'informazione non è nei dati, scrivi esplicitamente 'dato non disponibile'.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale di 200-250 parole in italiano che risponde direttamente alla richiesta del CEO. Indica 3 azioni concrete da intraprendere nelle prossime 48 ore. Tono diretto, manageriale.`;
+    const prompt = `${temporalContext}${configContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nREGOLA CRITICA: Riporta SOLO informazioni esplicitamente presenti nei dati forniti. Non fare inferenze, non aggiungere contesto esterno, non ipotizzare. Se un'informazione non è nei dati, scrivi esplicitamente 'dato non disponibile'.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale in italiano strutturato così:\n1. SINTESI GENERALE (3-4 righe)\n2. EMAIL PER CASELLA: elenca TUTTE le caselle presenti nei dati, anche quelle con poca attività. Per ognuna scrivi 1-2 righe con mittente, oggetto e cosa richiede attenzione.\n3. KPI E PIPELINE: trend principali\n4. 3 AZIONI CONCRETE nelle prossime 48 ore\nNon omettere nessuna casella presente nei dati. Tono diretto, manageriale.`;
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
     });
     const data = await anthropicRes.json();
     const testo = data.content?.[0]?.text ?? "Errore";
