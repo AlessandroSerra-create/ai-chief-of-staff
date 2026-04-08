@@ -76,12 +76,18 @@ def genera_report(riassunto):
         http_client=http_client,
     )
 
-    prompt = f"""Sei un analista commerciale. Genera un report manageriale in italiano con 4 sezioni:
-1. RIEPILOGO KPI (trend 7 giorni, medie, anomalie)
-2. PIPELINE CRM (pattern note, priorità, aziende ferme)
-3. PROSPECT (chi contattare e perché)
-4. ALERT CEO (cali, buchi dati, urgenze)
-Sii conciso. Dati: {riassunto}"""
+    prompt = f"""Você é o Chief of Staff de IA da Sorelle Brasil, empresa de produtos de aloe vera no Brasil e Argentina.
+Analise os dados abaixo e gere um relatório intermediário em português com 4 seções:
+
+1. KPIs (tendência dos últimos 7 dias — o que está subindo, o que está caindo, o que preocupa)
+2. PIPELINE CRM (empresas que precisam de atenção, contatos parados, prioridades)
+3. PROSPECTS (quem contatar e por quê)
+4. ALERTAS (quedas, dados faltando, urgências para o CEO)
+
+Interprete os dados — não apenas liste. Se um número é baixo, diga que é baixo e por quê isso importa.
+Seja direto e conciso.
+
+Dados: {riassunto}"""
 
     max_tentativi = 3
     attesa = 5
