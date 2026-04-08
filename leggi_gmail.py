@@ -3,36 +3,38 @@ import json
 import base64
 import re
 from datetime import datetime, timedelta
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-CREDENTIALS_FILE = 'gmail_credentials.json'
-TOKEN_FILE = 'gmail_token.json'
 
 CASELLE = [
     'serra@sorellebrasil.com',
+    'producao@sorellebrasil.com',
+    'incardona@sorellebrasil.com',
+    'dscottini@sorellebrasil.com',
+    'vendas@sorellebrasil.com',
+    'gilvolpato@sorellebrasil.com',
+    'j.werlich@sorellebrasil.com',
+    'qualidade@sorellebrasil.com',
+    'pcp@sorellebrasil.com',
+    'lucac@sorellebrasil.com',
+    'financeiro@sorellebrasil.com',
+    'laboratorio@sorellebrasil.com',
+    'sorelle@sorellebrasil.com',
+    'u.garanhani@sorellebrasil.com',
+    'valerio@sorellebrasil.com',
+    'compras@sorellebrasil.com',
 ]
 
 def get_service(email):
-    token_file = f'gmail_token_{email.replace("@","_").replace(".","_")}.json'
-    if not os.path.exists(token_file) and os.environ.get("GMAIL_TOKEN_SERRA"):
-        with open(token_file, 'w') as f:
-            f.write(os.environ["GMAIL_TOKEN_SERRA"])
-    creds = None
-    if os.path.exists(token_file):
-        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_file, 'w') as f:
-            f.write(creds.to_json())
-    return build('gmail', 'v1', credentials=creds)
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if not creds_json:
+        raise RuntimeError("GOOGLE_CREDENTIALS_JSON non impostata")
+    info = json.loads(creds_json)
+    credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    delegated_credentials = credentials.with_subject(email)
+    return build('gmail', 'v1', credentials=delegated_credentials)
 
 def get_header(headers, name):
     for h in headers:
