@@ -74,46 +74,43 @@ Deno.serve(async (_req) => {
       return (p.email_ricevute?.length ?? 0) > 0 || (p.email_inviate?.length ?? 0) > 0;
     });
 
-    // Processa in batch di 4 per non sovraccaricare
-    for (let i = 0; i < caselle.length; i += 4) {
-      const batch = caselle.slice(i, i + 4);
-      const results = await Promise.all(batch.map(async (row: any) => {
-        const fonte = row.fonte as string;
-        const p = row.payload ?? {};
-        const ricevute = p.email_ricevute ?? [];
-        const inviate = p.email_inviate ?? [];
-        const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
+    // Processa tutte le caselle Gmail in parallelo
+    const gmailResults = await Promise.all(caselle.map(async (row: any) => {
+      const fonte = row.fonte as string;
+      const p = row.payload ?? {};
+      const ricevute = p.email_ricevute ?? [];
+      const inviate = p.email_inviate ?? [];
+      const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
 
-        const report = await callClaude(
-          `Sei il Chief of Staff AI. Produci un report dettagliato della casella ${emailName} degli ultimi 2 giorni.\n\n` +
-          `DATI EMAIL RICEVUTE:\n${JSON.stringify(ricevute, null, 2)}\n\n` +
-          `DATI EMAIL INVIATE:\n${JSON.stringify(inviate, null, 2)}\n\n` +
-          `Il report DEVE contenere queste 3 sezioni:\n\n` +
-          `1. **EMAIL RICEVUTE** — elenca OGNI email con: mittente (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
-          `2. **EMAIL INVIATE** — elenca OGNI email con: destinatario (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
-          `3. **ANALISI** — breve analisi (max 80 parole): temi principali delle comunicazioni, cosa appare urgente o richiede azione immediata.\n\n` +
-          `REGOLE: Non fare riassunti vaghi. Elenca ogni email singolarmente con mittente/destinatario e oggetto esatto. Il CEO deve poter cercare per nome o azienda. Scrivi in italiano.`
-        );
-        return { fonte, report };
-      }));
+      const report = await callClaude(
+        `Sei il Chief of Staff AI. Produci un report dettagliato della casella ${emailName} degli ultimi 2 giorni.\n\n` +
+        `DATI EMAIL RICEVUTE:\n${JSON.stringify(ricevute, null, 2)}\n\n` +
+        `DATI EMAIL INVIATE:\n${JSON.stringify(inviate, null, 2)}\n\n` +
+        `Il report DEVE contenere queste 3 sezioni:\n\n` +
+        `1. **EMAIL RICEVUTE** — elenca OGNI email con: mittente (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
+        `2. **EMAIL INVIATE** — elenca OGNI email con: destinatario (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
+        `3. **ANALISI** — breve analisi (max 80 parole): temi principali delle comunicazioni, cosa appare urgente o richiede azione immediata.\n\n` +
+        `REGOLE: Non fare riassunti vaghi. Elenca ogni email singolarmente con mittente/destinatario e oggetto esatto. Il CEO deve poter cercare per nome o azienda. Scrivi in italiano.`
+      );
+      return { fonte, report };
+    }));
 
-      await Promise.all(results.map(({ fonte, report }) => {
-        gmailFonti.push(fonte);
-        return salvaReport(cliente, fonte, report);
-      }));
-    }
+    await Promise.all(gmailResults.map(({ fonte, report }) => {
+      gmailFonti.push(fonte);
+      return salvaReport(cliente, fonte, report);
+    }));
 
-    // Chiama report-finale dopo che tutti i report sono stati salvati
+    // Chiama report-finale fire-and-forget (non aspetta il completamento)
     const reportFinaleUrl = `${SUPABASE_URL}/functions/v1/report-finale`;
-    await fetch(reportFinaleUrl, {
+    fetch(reportFinaleUrl, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ cliente: "aloe-vera-pilot" }),
-    });
-    console.log("report-finale chiamato.");
+    }).catch((e) => console.error("Errore fire-and-forget report-finale:", e));
+    console.log("report-finale lanciato (fire-and-forget).");
 
     return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", ...gmailFonti] }), {
       headers: { "Content-Type": "application/json" },
