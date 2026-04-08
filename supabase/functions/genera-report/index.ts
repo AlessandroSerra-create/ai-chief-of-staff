@@ -4,11 +4,11 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-async function callClaude(prompt: string): Promise<string> {
+async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1024, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
   const data = await res.json();
   return data.content?.[0]?.text ?? "Errore nella generazione";
@@ -28,7 +28,7 @@ async function salvaReport(cliente: string, fonte: string, testo: string) {
   console.log(`Salvato report ${fonte}: status ${res.status}`);
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (_req) => {
   try {
     const cliente = "aloe-vera-pilot";
 
@@ -42,23 +42,25 @@ Deno.serve(async (req) => {
 
     const payload = rows[0].payload;
 
-    // Report KPI
+    // KPI, CRM, Prospect in parallelo
     const kpi = payload.KPI?.rows?.slice(-7) ?? [];
-    const reportKPI = await callClaude(`Sei il Chief of Staff AI. Analizza questi KPI commerciali degli ultimi 7 giorni e scrivi un report di 100 parole in italiano. Identifica trend e anomalie. Tono diretto.\n\n${JSON.stringify(kpi, null, 2)}`);
-    await salvaReport(cliente, "kpi", reportKPI);
-
-    // Report CRM
     const crm = (payload.CRM?.rows ?? []).filter((r: any) => r.Note).slice(0, 20);
-    const reportCRM = await callClaude(`Sei il Chief of Staff AI. Analizza questi contatti CRM con note recenti e scrivi un report di 100 parole in italiano. Identifica opportunità e rischi. Tono diretto.\n\n${JSON.stringify(crm, null, 2)}`);
-    await salvaReport(cliente, "crm", reportCRM);
-
-    // Report Prospect
     const bra = payload.BRA?.rows?.slice(0, 10) ?? [];
     const arg = payload.ARG?.rows?.slice(0, 10) ?? [];
-    const reportProspect = await callClaude(`Sei il Chief of Staff AI. Analizza questi prospect per Brasile e Argentina e scrivi un report di 100 parole in italiano. Identifica priorità di contatto. Tono diretto.\n\nBRASILE:\n${JSON.stringify(bra, null, 2)}\n\nARGENTINA:\n${JSON.stringify(arg, null, 2)}`);
-    await salvaReport(cliente, "prospect", reportProspect);
 
-    // Report Gmail — un report per ogni casella
+    const [reportKPI, reportCRM, reportProspect] = await Promise.all([
+      callClaude(`Sei il Chief of Staff AI. Analizza questi KPI commerciali degli ultimi 7 giorni e scrivi un report di 100 parole in italiano. Identifica trend e anomalie. Tono diretto.\n\n${JSON.stringify(kpi, null, 2)}`, 1024),
+      callClaude(`Sei il Chief of Staff AI. Analizza questi contatti CRM con note recenti e scrivi un report di 100 parole in italiano. Identifica opportunità e rischi. Tono diretto.\n\n${JSON.stringify(crm, null, 2)}`, 1024),
+      callClaude(`Sei il Chief of Staff AI. Analizza questi prospect per Brasile e Argentina e scrivi un report di 100 parole in italiano. Identifica priorità di contatto. Tono diretto.\n\nBRASILE:\n${JSON.stringify(bra, null, 2)}\n\nARGENTINA:\n${JSON.stringify(arg, null, 2)}`, 1024),
+    ]);
+
+    await Promise.all([
+      salvaReport(cliente, "kpi", reportKPI),
+      salvaReport(cliente, "crm", reportCRM),
+      salvaReport(cliente, "prospect", reportProspect),
+    ]);
+
+    // Report Gmail — un report per ogni casella, in parallelo a batch di 4
     const gmailRes = await fetch(
       `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.${cliente}&fonte=like.gmail_*&order=creato_at.desc`,
       { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
@@ -66,24 +68,39 @@ Deno.serve(async (req) => {
     const gmailRows = await gmailRes.json();
     const gmailFonti: string[] = [];
 
-    for (const row of gmailRows) {
-      const fonte = row.fonte as string;
+    // Filtra caselle con dati
+    const caselle = gmailRows.filter((row: any) => {
       const p = row.payload ?? {};
-      const ricevute = p.email_ricevute ?? [];
-      const inviate = p.email_inviate ?? [];
+      return (p.email_ricevute?.length ?? 0) > 0 || (p.email_inviate?.length ?? 0) > 0;
+    });
 
-      if (ricevute.length === 0 && inviate.length === 0) continue;
+    // Processa in batch di 4 per non sovraccaricare
+    for (let i = 0; i < caselle.length; i += 4) {
+      const batch = caselle.slice(i, i + 4);
+      const results = await Promise.all(batch.map(async (row: any) => {
+        const fonte = row.fonte as string;
+        const p = row.payload ?? {};
+        const ricevute = p.email_ricevute ?? [];
+        const inviate = p.email_inviate ?? [];
+        const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
 
-      const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
+        const report = await callClaude(
+          `Sei il Chief of Staff AI. Produci un report dettagliato della casella ${emailName} degli ultimi 2 giorni.\n\n` +
+          `DATI EMAIL RICEVUTE:\n${JSON.stringify(ricevute, null, 2)}\n\n` +
+          `DATI EMAIL INVIATE:\n${JSON.stringify(inviate, null, 2)}\n\n` +
+          `Il report DEVE contenere queste 3 sezioni:\n\n` +
+          `1. **EMAIL RICEVUTE** — elenca OGNI email con: mittente (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
+          `2. **EMAIL INVIATE** — elenca OGNI email con: destinatario (nome e indirizzo), oggetto esatto, data. Non omettere nessuna email.\n\n` +
+          `3. **ANALISI** — breve analisi (max 80 parole): temi principali delle comunicazioni, cosa appare urgente o richiede azione immediata.\n\n` +
+          `REGOLE: Non fare riassunti vaghi. Elenca ogni email singolarmente con mittente/destinatario e oggetto esatto. Il CEO deve poter cercare per nome o azienda. Scrivi in italiano.`
+        );
+        return { fonte, report };
+      }));
 
-      const reportGmail = await callClaude(
-        `Sei il Chief of Staff AI. Analizza le comunicazioni email esterne della casella ${emailName} degli ultimi 2 giorni.\n\n` +
-        `EMAIL RICEVUTE (da esterni):\n${JSON.stringify(ricevute, null, 2)}\n\n` +
-        `EMAIL INVIATE (a esterni):\n${JSON.stringify(inviate, null, 2)}\n\n` +
-        `Scrivi un riassunto di 80 parole in italiano: con chi ha comunicato, su quali argomenti, cosa sembra urgente. Tono diretto.`
-      );
-      await salvaReport(cliente, fonte, reportGmail);
-      gmailFonti.push(fonte);
+      await Promise.all(results.map(({ fonte, report }) => {
+        gmailFonti.push(fonte);
+        return salvaReport(cliente, fonte, report);
+      }));
     }
 
     return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", ...gmailFonti] }), {

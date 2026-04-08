@@ -147,7 +147,7 @@ def salva_su_supabase(email, payload_casella, supabase_key):
             timeout=15,
         )
 
-    print(f"  Supabase {fonte}: {response.status_code}")
+    print(f"  Supabase {fonte}: {response.status_code} {response.text}")
 
 
 def main():

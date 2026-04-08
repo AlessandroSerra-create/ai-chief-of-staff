@@ -20,3 +20,9 @@ env/
 
 # macOS
 .DS_Store
+
+# Secrets & tokens
+gmail_credentials.json
+gmail_token_*.json
+dati_gmail.json
+.vscode/
