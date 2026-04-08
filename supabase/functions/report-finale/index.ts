@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
         }
       } catch (_) { /* non bloccante */ }
 
-      const prompt = `${temporalContext}${configContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale di 200-250 parole in italiano che risponde direttamente alla richiesta del CEO. Indica 3 azioni concrete da intraprendere nelle prossime 48 ore. Tono diretto, manageriale.`;
+      const prompt = `${temporalContext}${configContext}Sei il Chief of Staff AI di un'azienda che vende prodotti aloe vera in Brasile e Argentina.\n\nREGOLA CRITICA: Riporta SOLO informazioni esplicitamente presenti nei dati forniti. Non fare inferenze, non aggiungere contesto esterno, non ipotizzare. Se un'informazione non è nei dati, scrivi esplicitamente 'dato non disponibile'. È preferibile un report più corto e accurato che uno completo ma con informazioni inventate.\n\nIl CEO ha richiesto: "${focus}"\n\nReport disponibili:\n${reportsText}\n\nScrivi un report finale di 200-250 parole in italiano che risponde direttamente alla richiesta del CEO. Indica 3 azioni concrete da intraprendere nelle prossime 48 ore. Tono diretto, manageriale.`;
 
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
