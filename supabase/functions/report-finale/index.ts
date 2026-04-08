@@ -12,7 +12,7 @@ Deno.serve(async (req) => {
   EdgeRuntime.waitUntil((async () => {
     try {
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/reports?cliente=eq.${cliente}&fonte=neq.finale&order=created_at.desc&limit=10`,
+        `${SUPABASE_URL}/rest/v1/reports?cliente=eq.${cliente}&fonte=neq.finale&order=created_at.desc&limit=50`,
         { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
       );
       const reports = await res.json();
@@ -23,9 +23,22 @@ Deno.serve(async (req) => {
         if (!byFonte[r.fonte]) byFonte[r.fonte] = r.testo;
       }
 
-      const reportsText = Object.entries(byFonte)
-        .map(([fonte, testo]) => `## ${fonte.toUpperCase()}\n${testo}`)
-        .join("\n\n");
+      // Separa report principali da gmail
+      const mainReports: string[] = [];
+      const gmailReports: string[] = [];
+      for (const [fonte, testo] of Object.entries(byFonte)) {
+        if (fonte.startsWith("gmail_")) {
+          const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
+          gmailReports.push(`### ${emailName}\n${testo}`);
+        } else {
+          mainReports.push(`## ${fonte.toUpperCase()}\n${testo}`);
+        }
+      }
+
+      let reportsText = mainReports.join("\n\n");
+      if (gmailReports.length) {
+        reportsText += `\n\n## COMUNICAZIONI EMAIL\n${gmailReports.join("\n\n")}`
+      }
 
       // Recupera configurazione cliente
       let configContext = "";

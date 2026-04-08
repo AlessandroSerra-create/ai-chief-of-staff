@@ -30,15 +30,17 @@ async function salvaReport(cliente: string, fonte: string, testo: string) {
 
 Deno.serve(async (req) => {
   try {
+    const cliente = "aloe-vera-pilot";
+
+    // Leggi canonical_data principale (KPI, CRM, prospect)
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot&order=creato_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.${cliente}&fonte=is.null&order=creato_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
     );
     const rows = await res.json();
     if (!rows.length) return new Response("Nessun dato trovato", { status: 404 });
 
     const payload = rows[0].payload;
-    const cliente = "aloe-vera-pilot";
 
     // Report KPI
     const kpi = payload.KPI?.rows?.slice(-7) ?? [];
@@ -56,12 +58,35 @@ Deno.serve(async (req) => {
     const reportProspect = await callClaude(`Sei il Chief of Staff AI. Analizza questi prospect per Brasile e Argentina e scrivi un report di 100 parole in italiano. Identifica priorità di contatto. Tono diretto.\n\nBRASILE:\n${JSON.stringify(bra, null, 2)}\n\nARGENTINA:\n${JSON.stringify(arg, null, 2)}`);
     await salvaReport(cliente, "prospect", reportProspect);
 
-    // Report Gmail
-    const gmail = payload.gmail ?? {};
-    const reportGmail = await callClaude(`Sei un assistente che analizza le comunicazioni email di un'azienda.\nAnalizza questi thread email e produci un report conciso con:\n- Con chi sta comunicando ogni casella (esterni vs interni)\n- I principali argomenti delle conversazioni in corso\n- Eventuali email che sembrano urgenti o importanti\nDati: ${JSON.stringify(gmail, null, 2)}`);
-    await salvaReport(cliente, "gmail", reportGmail);
+    // Report Gmail — un report per ogni casella
+    const gmailRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.${cliente}&fonte=like.gmail_*&order=creato_at.desc`,
+      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
+    );
+    const gmailRows = await gmailRes.json();
+    const gmailFonti: string[] = [];
 
-    return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", "gmail"] }), {
+    for (const row of gmailRows) {
+      const fonte = row.fonte as string;
+      const p = row.payload ?? {};
+      const ricevute = p.email_ricevute ?? [];
+      const inviate = p.email_inviate ?? [];
+
+      if (ricevute.length === 0 && inviate.length === 0) continue;
+
+      const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
+
+      const reportGmail = await callClaude(
+        `Sei il Chief of Staff AI. Analizza le comunicazioni email esterne della casella ${emailName} degli ultimi 2 giorni.\n\n` +
+        `EMAIL RICEVUTE (da esterni):\n${JSON.stringify(ricevute, null, 2)}\n\n` +
+        `EMAIL INVIATE (a esterni):\n${JSON.stringify(inviate, null, 2)}\n\n` +
+        `Scrivi un riassunto di 80 parole in italiano: con chi ha comunicato, su quali argomenti, cosa sembra urgente. Tono diretto.`
+      );
+      await salvaReport(cliente, fonte, reportGmail);
+      gmailFonti.push(fonte);
+    }
+
+    return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", ...gmailFonti] }), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {

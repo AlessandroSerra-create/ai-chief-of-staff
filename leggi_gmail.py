@@ -1,12 +1,12 @@
 import os
 import json
 import base64
-import re
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+DOMINIO_INTERNO = 'sorellebrasil.com'
 
 CASELLE = [
     'serra@sorellebrasil.com',
@@ -27,20 +27,29 @@ CASELLE = [
     'compras@sorellebrasil.com',
 ]
 
+SUPABASE_URL = "https://xnduljfrfmyaxyjhrsfk.supabase.co"
+
+
+def sanitize_email(email):
+    return email.replace("@", "_").replace(".", "_")
+
+
 def get_service(email):
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    creds_json = os.environ.get("GMAIL_CREDENTIALS_JSON")
     if not creds_json:
-        raise RuntimeError("GOOGLE_CREDENTIALS_JSON non impostata")
+        raise RuntimeError("GMAIL_CREDENTIALS_JSON non impostata")
     info = json.loads(creds_json)
     credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     delegated_credentials = credentials.with_subject(email)
     return build('gmail', 'v1', credentials=delegated_credentials)
+
 
 def get_header(headers, name):
     for h in headers:
         if h['name'].lower() == name.lower():
             return h['value']
     return ''
+
 
 def extract_text(payload):
     text = ''
@@ -52,98 +61,111 @@ def extract_text(payload):
         text += base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
     return text[:500]
 
-def leggi_casella(email, giorni=7):
+
+def is_esterno(indirizzo):
+    if not indirizzo:
+        return False
+    return DOMINIO_INTERNO not in indirizzo.lower()
+
+
+def parse_email(msg_data):
+    headers = msg_data['payload'].get('headers', [])
+    return {
+        'mittente': get_header(headers, 'From'),
+        'destinatario': get_header(headers, 'To'),
+        'oggetto': get_header(headers, 'Subject'),
+        'anteprima': extract_text(msg_data['payload'])[:200],
+        'data': get_header(headers, 'Date'),
+    }
+
+
+def leggi_casella(email, giorni=2):
     service = get_service(email)
     dopo = (datetime.now() - timedelta(days=giorni)).strftime('%Y/%m/%d')
+
+    # Email ricevute da esterni
+    ricevute = []
     results = service.users().messages().list(
-        userId='me', q=f'after:{dopo}', maxResults=50
+        userId='me', q=f'after:{dopo} in:inbox', maxResults=40
     ).execute()
-    messages = results.get('messages', [])
-    threads = {}
-    for msg in messages:
+    for msg in results.get('messages', []):
+        if len(ricevute) >= 20:
+            break
         m = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
-        headers = m['payload'].get('headers', [])
-        thread_id = m['threadId']
-        mittente = get_header(headers, 'From')
-        destinatario = get_header(headers, 'To')
-        oggetto = get_header(headers, 'Subject')
-        data = get_header(headers, 'Date')
-        testo = extract_text(m['payload'])
-        if thread_id not in threads:
-            threads[thread_id] = {
-                'oggetto': oggetto,
-                'data': data,
-                'partecipanti': set(),
-                'anteprima': testo[:200],
-                'tipo': 'interno' if all(
-                    email.split('@')[1] in p for p in [mittente, destinatario] if p
-                ) else 'esterno'
-            }
-        threads[thread_id]['partecipanti'].add(mittente)
-        threads[thread_id]['partecipanti'].add(destinatario)
-    result = []
-    for tid, t in threads.items():
-        result.append({
-            'oggetto': t['oggetto'],
-            'data': t['data'],
-            'partecipanti': list(t['partecipanti']),
-            'anteprima': t['anteprima'],
-            'tipo': t['tipo']
-        })
-    return result
+        parsed = parse_email(m)
+        if is_esterno(parsed['mittente']):
+            ricevute.append(parsed)
+
+    # Email inviate a esterni
+    inviate = []
+    results = service.users().messages().list(
+        userId='me', q=f'after:{dopo} in:sent', maxResults=40
+    ).execute()
+    for msg in results.get('messages', []):
+        if len(inviate) >= 20:
+            break
+        m = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+        parsed = parse_email(m)
+        if is_esterno(parsed['destinatario']):
+            inviate.append(parsed)
+
+    return {'email_ricevute': ricevute, 'email_inviate': inviate}
+
+
+def salva_su_supabase(email, payload_casella, supabase_key):
+    import requests as req
+    fonte = f"gmail_{sanitize_email(email)}"
+
+    # Prova PATCH prima (aggiorna record esistente)
+    response = req.patch(
+        f"{SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot&fonte=eq.{fonte}",
+        headers={
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        },
+        json={"payload": payload_casella},
+        timeout=15,
+    )
+
+    # Se PATCH non ha aggiornato niente (nessun record esistente), fai POST
+    if response.status_code == 200 and response.json() == []:
+        response = req.post(
+            f"{SUPABASE_URL}/rest/v1/canonical_data",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json={
+                "cliente": "aloe-vera-pilot",
+                "fonte": fonte,
+                "payload": payload_casella,
+            },
+            timeout=15,
+        )
+
+    print(f"  Supabase {fonte}: {response.status_code}")
+
 
 def main():
-    canonical = {}
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
     for email in CASELLE:
         print(f'Lettura {email}...')
         try:
-            threads = leggi_casella(email)
-            canonical[email] = threads
-            print(f'  {len(threads)} thread trovati')
+            risultato = leggi_casella(email)
+            print(f'  {len(risultato["email_ricevute"])} ricevute, {len(risultato["email_inviate"])} inviate')
+
+            if supabase_key:
+                salva_su_supabase(email, risultato, supabase_key)
         except Exception as e:
             print(f'  ERRORE: {e}')
-            canonical[email] = []
-    with open('dati_gmail.json', 'w', encoding='utf-8') as f:
-        json.dump(canonical, f, ensure_ascii=False, indent=2)
-    print('Salvato: dati_gmail.json')
 
-    import requests as req
-    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if supabase_key:
-        try:
-            # 1. Leggi il payload esistente
-            get_resp = req.get(
-                "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot&select=payload",
-                headers={
-                    "apikey": supabase_key,
-                    "Authorization": f"Bearer {supabase_key}",
-                },
-                timeout=15,
-            )
-            existing_payload = {}
-            if get_resp.status_code == 200 and get_resp.json():
-                existing_payload = get_resp.json()[0].get("payload", {}) or {}
+    print('Completato.')
 
-            # 2. Merge: aggiorna solo il campo gmail
-            existing_payload["gmail"] = canonical
-
-            # 3. PATCH (upsert) sul record esistente
-            response = req.patch(
-                "https://xnduljfrfmyaxyjhrsfk.supabase.co/rest/v1/canonical_data?cliente=eq.aloe-vera-pilot",
-                headers={
-                    "apikey": supabase_key,
-                    "Authorization": f"Bearer {supabase_key}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=minimal",
-                },
-                json={"payload": existing_payload},
-                timeout=15,
-            )
-            print(f"Supabase gmail: {response.status_code}")
-        except Exception as e:
-            print(f"ERRORE Supabase gmail: {e}")
-
-    return canonical
 
 if __name__ == '__main__':
     main()
