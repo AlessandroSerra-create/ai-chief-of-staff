@@ -103,6 +103,18 @@ Deno.serve(async (_req) => {
       }));
     }
 
+    // Chiama report-finale dopo che tutti i report sono stati salvati
+    const reportFinaleUrl = `${SUPABASE_URL}/functions/v1/report-finale`;
+    await fetch(reportFinaleUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ cliente: "aloe-vera-pilot" }),
+    });
+    console.log("report-finale chiamato.");
+
     return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", ...gmailFonti] }), {
       headers: { "Content-Type": "application/json" },
     });
