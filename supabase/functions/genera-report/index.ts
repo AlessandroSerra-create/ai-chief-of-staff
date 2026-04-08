@@ -100,18 +100,6 @@ Deno.serve(async (_req) => {
       return salvaReport(cliente, fonte, report);
     }));
 
-    // Chiama report-finale fire-and-forget (non aspetta il completamento)
-    const reportFinaleUrl = `${SUPABASE_URL}/functions/v1/report-finale`;
-    fetch(reportFinaleUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ cliente: "aloe-vera-pilot" }),
-    }).catch((e) => console.error("Errore fire-and-forget report-finale:", e));
-    console.log("report-finale lanciato (fire-and-forget).");
-
     return new Response(JSON.stringify({ ok: true, fonti: ["kpi", "crm", "prospect", ...gmailFonti] }), {
       headers: { "Content-Type": "application/json" },
     });

@@ -57,6 +57,23 @@ def chiama_genera_report():
         log(f"ERRORE genera-report: {e}")
 
 
+def chiama_report_finale():
+    try:
+        log("Chiamata Edge Function report-finale...")
+        res = requests.post(
+            "https://xnduljfrfmyaxyjhrsfk.supabase.co/functions/v1/report-finale",
+            headers={
+                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={},
+            timeout=120,
+        )
+        log(f"report-finale: status {res.status_code}")
+    except Exception as e:
+        log(f"ERRORE report-finale: {e}")
+
+
 def aggiorna_dati_e_report():
     log("=== CICLO ORARIO: aggiornamento dati e report ===")
     ok = esegui_script("leggi_sheet.py")
@@ -64,6 +81,8 @@ def aggiorna_dati_e_report():
     if ok:
         esegui_script("salva_su_supabase.py")
         chiama_genera_report()
+        time.sleep(600)
+        chiama_report_finale()
     else:
         log("Salvataggio Supabase e genera-report saltati a causa di errore in leggi_sheet.py.")
     log("=== CICLO ORARIO completato ===")
