@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 
 JSON_FILE = "dati_canonici.json"
 MODEL = "claude-opus-4-5"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+CLIENTE = "aloe-vera-pilot"
 
 
 def carica_dati():
@@ -69,6 +72,28 @@ def costruisci_riassunto(dati):
     return riassunto[:2000]
 
 
+def carica_config_da_supabase():
+    """Legge prompt e contesto aziendale da Supabase."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return {}, ""
+    try:
+        headers = {
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        }
+        res = httpx.get(
+            f"{SUPABASE_URL}/rest/v1/configurazioni?cliente=eq.{CLIENTE}&limit=1",
+            headers=headers,
+            timeout=10,
+        )
+        rows = res.json()
+        if rows:
+            return rows[0], rows[0].get("contesto_azienda", "")
+    except Exception as e:
+        print(f"Errore lettura config Supabase: {e}", flush=True)
+    return {}, ""
+
+
 def genera_report(riassunto):
     http_client = httpx.Client(timeout=httpx.Timeout(None, connect=15.0))
     client = anthropic.Anthropic(
@@ -76,17 +101,22 @@ def genera_report(riassunto):
         http_client=http_client,
     )
 
-    prompt = f"""Você é o Chief of Staff de IA da Sorelle Brasil, empresa de produtos de aloe vera no Brasil e Argentina.
+    config, contesto_azienda = carica_config_da_supabase()
+    prompt_template = config.get("prompt_genera_report", "")
+
+    if prompt_template:
+        prompt = prompt_template \
+            .replace("{contesto_azienda}", contesto_azienda) \
+            .replace("{riassunto}", riassunto)
+    else:
+        # Fallback
+        prompt = f"""Você é o Chief of Staff de IA da Sorelle Brasil.
 Analise os dados abaixo e gere um relatório intermediário em português com 4 seções:
-
-1. KPIs (tendência dos últimos 7 dias — o que está subindo, o que está caindo, o que preocupa)
-2. PIPELINE CRM (empresas que precisam de atenção, contatos parados, prioridades)
+1. KPIs (tendência dos últimos 7 dias)
+2. PIPELINE CRM (empresas que precisam de atenção)
 3. PROSPECTS (quem contatar e por quê)
-4. ALERTAS (quedas, dados faltando, urgências para o CEO)
-
-Interprete os dados — não apenas liste. Se um número é baixo, diga que é baixo e por quê isso importa.
-Seja direto e conciso.
-
+4. ALERTAS (quedas, dados faltando, urgências)
+Interprete os dados — não apenas liste.
 Dados: {riassunto}"""
 
     max_tentativi = 3
