@@ -4,6 +4,7 @@ import time
 import json
 import os
 import requests
+import pytz
 from datetime import datetime, timedelta
 
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
@@ -64,6 +65,112 @@ def chiama_report_finale():
             "https://xnduljfrfmyaxyjhrsfk.supabase.co/functions/v1/report-finale",
             headers={
                 "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={},
+            timeout=120,
+        )
+        log(f"report-finale: status {res.status_code}")
+    except Exception as e:
+        log(f"ERRORE report-finale: {e}")
+
+
+def aggiorna_dati_e_report():
+    ora_brasilia = datetime.now(pytz.timezone("America/Sao_Paulo")).hour
+    if not (8 <= ora_brasilia <= 20):
+        log(f"Ciclo orario saltato: ore {ora_brasilia}:00 fuori finestra operativa (8-20).")
+        return
+
+    log("=== CICLO ORARIO: aggiornamento dati e report ===")
+    ok = esegui_script("leggi_sheet.py")
+    esegui_script("leggi_gmail.py")
+    if ok:
+        esegui_script("salva_su_supabase.py")
+        chiama_genera_report()
+        time.sleep(600)
+        chiama_report_finale()
+    else:
+        log("Salvataggio Supabase e genera-report saltati a causa di errore in leggi_sheet.py.")
+    log("=== CICLO ORARIO completato ===")
+
+
+def controlla_kpi_ieri():
+    log("=== CONTROLLO GIORNALIERO KPI ===")
+    ieri = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
+    log(f"Ricerca dati KPI per la data: {ieri}")
+
+    if not os.path.exists(JSON_FILE):
+        log("ERRORE: dati_canonici.json non trovato. Eseguo aggiornamento dati prima.")
+        esegui_script("leggi_sheet.py")
+
+    try:
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            dati = json.load(f)
+    except Exception as e:
+        log(f"ERRORE lettura dati_canonici.json: {e}")
+        return
+
+    kpi_rows = dati.get("KPI", {}).get("rows", [])
+    colonne_numeriche = [
+        "Novos e-mails enviados",
+        "Follow-ups enviados",
+        "Respostas recebidas",
+        "Ligações efetuadas",
+        "Reuniões agendadas",
+    ]
+
+    riga_ieri = None
+    for row in kpi_rows:
+        data_riga = row.get("Data", "").strip()
+        if data_riga == ieri:
+            riga_ieri = row
+            break
+
+    if riga_ieri is None:
+        log(f"ALERT: KPI non compilati ieri ({ieri}) - riga non trovata nel foglio.")
+        log(">>> ALERT: KPI non compilati ieri - notifica collaboratore e CEO <<<")
+        return
+
+    valori_vuoti = all(
+        not riga_ieri.get(col, "").strip() or riga_ieri.get(col, "").strip() in ("0", "")
+        for col in colonne_numeriche
+    )
+
+    if valori_vuoti:
+        log(f"ALERT: KPI non compilati ieri ({ieri}) - tutti i valori sono vuoti o zero.")
+        log(">>> ALERT: KPI non compilati ieri - notifica collaboratore e CEO <<<")
+    else:
+        valori = {col: riga_ieri.get(col, "N/D") for col in colonne_numeriche}
+        log(f"KPI di ieri ({ieri}) presenti e compilati: {valori}")
+
+    log("=== CONTROLLO GIORNALIERO KPI completato ===")
+
+
+def main():
+    log("========================================")
+    log("Scheduler avviato.")
+    log("Ciclo orario: leggi_sheet.py + salva_su_supabase.py")
+    log("Ciclo orario attivo: 08:00 - 20:00 (orario Brasilia)")
+    log("Controllo KPI giornaliero: ogni giorno alle 09:00")
+    log("========================================")
+
+    # Primo run immediato all'avvio
+    aggiorna_dati_e_report()
+    controlla_kpi_ieri()
+
+    # Pianificazione
+    schedule.every(1).hours.do(aggiorna_dati_e_report)
+    schedule.every().day.at("09:00").do(controlla_kpi_ieri)
+
+    log("Scheduler in ascolto. Prossima esecuzione oraria tra 60 minuti.")
+
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
+
+
+if __name__ == "__main__":
+    main()                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
                 "Content-Type": "application/json",
             },
             json={},
