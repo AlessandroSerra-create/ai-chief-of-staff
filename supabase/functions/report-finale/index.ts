@@ -38,7 +38,11 @@ Deno.serve(async (req) => {
       reportsText += `\n\n## COMUNICAÇÕES EMAIL\n${gmailReports.join("\n\n")}`;
     }
 
+    // Legge prompt e contesto da configurazioni
+    let contesto_azienda = "";
+    let promptTemplate = "";
     let configContext = "";
+
     try {
       const configRes = await fetch(
         `${SUPABASE_URL}/rest/v1/configurazioni?cliente=eq.${cliente}&limit=1`,
@@ -47,10 +51,12 @@ Deno.serve(async (req) => {
       const configRows = await configRes.json();
       if (configRows.length) {
         const config = configRows[0];
+        contesto_azienda = config.contesto_azienda ?? "";
+        promptTemplate = config.prompt_report_finale ?? "";
         const focusList = Array.isArray(config.focus) ? config.focus.join(", ") : (config.focus ?? "");
         const istruzione = config.istruzione_custom ?? "";
         if (focusList || istruzione) {
-          configContext = `FOCO SOLICITADO PELO CEO: ${focusList}\nINSTRUÇÃO PERSONALIZADA: ${istruzione}\nPrioritize esses aspectos na análise e nas recomendações.\n\n`;
+          configContext = `FOCO SOLICITADO PELO CEO: ${focusList}\nINSTRUÇÃO PERSONALIZADA: ${istruzione}\n\n`;
         }
       }
     } catch (_) {}
@@ -77,26 +83,17 @@ Deno.serve(async (req) => {
       }
     } catch (_) {}
 
-    const prompt = `${temporalContext}${configContext}Você é o Chief of Staff de IA da Sorelle Brasil, empresa de produtos de aloe vera no Brasil e Argentina.
-
-O CEO pediu: "${focus}"
-
-Relatórios disponíveis:
-${reportsText}
-
-COMO RESPONDER:
-- Fale como um Chief of Staff experiente, não como um sistema de dados
-- Se um dado não estiver no relatório, diga "não tenho esse dado no relatório atual" — e sugira o que verificar
-- Interprete os dados: o que significam para o negócio? O que exige atenção?
-- Nunca redirecione o CEO para "consultar logs" ou "verificar sistemas" — você é quem faz isso
-
-ESTRUTURA DO RELATÓRIO:
-1. SITUAÇÃO GERAL (3-4 linhas diretas — como está o negócio hoje)
-2. EMAIL POR CAIXA: todas as caixas presentes nos dados, 1-2 linhas cada
-3. KPI E PIPELINE: tendências principais, o que está indo bem e o que preocupa
-4. 3 AÇÕES CONCRETAS nas próximas 48 horas — específicas, acionáveis
-
-Tom: direto, profissional, como quem conhece bem o negócio e respeita o tempo do CEO.`;
+    // Costruisce il prompt finale
+    let prompt = `${temporalContext}${configContext}`;
+    if (promptTemplate) {
+      prompt += promptTemplate
+        .replace("{contesto_azienda}", contesto_azienda)
+        .replace("{focus}", focus)
+        .replace("{reportsText}", reportsText);
+    } else {
+      // Fallback
+      prompt += `Você é o Chief of Staff de IA da Sorelle Brasil.\nO CEO pediu: "${focus}"\n\nRelatórios disponíveis:\n${reportsText}\n\nSeja direto e profissional.`;
+    }
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
