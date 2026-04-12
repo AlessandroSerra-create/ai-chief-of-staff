@@ -69,20 +69,22 @@ def chiama_genera_report():
 
 
 def chiama_report_finale():
-    try:
-        log("Chiamata Edge Function report-finale...")
-        res = requests.post(
-            f"{SUPABASE_URL}/functions/v1/report-finale",
-            headers={
-                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={},
-            timeout=120,
-        )
-        log(f"report-finale: status {res.status_code}")
-    except Exception as e:
-        log(f"ERRORE report-finale: {e}")
+    for commerciale in COMMERCIALI:
+        cliente_id = f"aloe-vera-pilot-{commerciale}"
+        try:
+            log(f"Chiamata Edge Function report-finale [{commerciale}]...")
+            res = requests.post(
+                f"{SUPABASE_URL}/functions/v1/report-finale",
+                headers={
+                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={"cliente": cliente_id},
+                timeout=120,
+            )
+            log(f"report-finale [{commerciale}]: status {res.status_code}")
+        except Exception as e:
+            log(f"ERRORE report-finale [{commerciale}]: {e}")
 
 
 def aggiorna_dati_e_report():
@@ -99,7 +101,6 @@ def aggiorna_dati_e_report():
 
 
 def leggi_kpi_da_supabase(commerciale):
-    """Legge i dati KPI di un commerciale direttamente da Supabase."""
     try:
         cliente_id = f"aloe-vera-pilot-{commerciale}"
         res = requests.get(
