@@ -15,8 +15,8 @@ CREDENTIALS_FILE = os.environ.get(
 )
 
 COMMERCIALI = {
-    "pamela": "1AjWpKL8ptiiTS9ERSlfHLNtJT9bhTGFF3S1lYs2vUH8",
-    "dante":  "1XjsUv3TD1sF5upiwX29rbmIcueAvvT_TFQBi2Yq4e6g",
+    "pamela": "1XjsUv3TD1sF5upiwX29rbmIcueAvvT_TFQBi2Yq4e6g",
+    "dante":  "1AjWpKL8ptiiTS9ERSlfHLNtJT9bhTGFF3S1lYs2vUH8",
 }
 
 TAB_COLUMNS = {
