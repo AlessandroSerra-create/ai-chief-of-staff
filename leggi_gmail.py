@@ -9,21 +9,11 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 DOMINIO_INTERNO = 'sorellebrasil.com'
 
 CASELLE = [
-    'serra@sorellebrasil.com',
-    'producao@sorellebrasil.com',
-    'incardona@sorellebrasil.com',
     'dscottini@sorellebrasil.com',
     'vendas@sorellebrasil.com',
     'gilvolpato@sorellebrasil.com',
-    'j.werlich@sorellebrasil.com',
-    'qualidade@sorellebrasil.com',
-    'pcp@sorellebrasil.com',
     'lucac@sorellebrasil.com',
     'financeiro@sorellebrasil.com',
-    'laboratorio@sorellebrasil.com',
-    'sorelle@sorellebrasil.com',
-    'u.garanhani@sorellebrasil.com',
-    'valerio@sorellebrasil.com',
     'compras@sorellebrasil.com',
 ]
 
