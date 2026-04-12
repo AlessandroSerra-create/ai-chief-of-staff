@@ -2,6 +2,7 @@ anthropic==0.25.0
 httpx==0.24.1
 gspread
 google-auth
+google-api-python-client
 schedule
 requests
 fastapi
