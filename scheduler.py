@@ -7,12 +7,23 @@ import requests
 from datetime import datetime, timedelta
 
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
-GENERA_REPORT_URL = "https://xnduljfrfmyaxyjhrsfk.supabase.co/functions/v1/genera-report"
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_URL = "https://xnduljfrfmyaxyjhrsfk.supabase.co"
+GENERA_REPORT_URL = f"{SUPABASE_URL}/functions/v1/genera-report"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "log.txt")
-JSON_FILE = os.path.join(BASE_DIR, "dati_canonici.json")
 PYTHON = "python3"
+
+COMMERCIALI = ["pamela", "dante"]
+
+COLONNE_NUMERICHE = [
+    "Novos e-mails enviados",
+    "Follow-ups enviados",
+    "Respostas recebidas",
+    "Ligações efetuadas",
+    "Reuniões agendadas",
+]
 
 
 def log(messaggio):
@@ -61,7 +72,7 @@ def chiama_report_finale():
     try:
         log("Chiamata Edge Function report-finale...")
         res = requests.post(
-            "https://xnduljfrfmyaxyjhrsfk.supabase.co/functions/v1/report-finale",
+            f"{SUPABASE_URL}/functions/v1/report-finale",
             headers={
                 "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
                 "Content-Type": "application/json",
@@ -79,63 +90,75 @@ def aggiorna_dati_e_report():
     ok = esegui_script("leggi_sheet.py")
     esegui_script("leggi_gmail.py")
     if ok:
-        esegui_script("salva_su_supabase.py")
         chiama_genera_report()
         time.sleep(600)
         chiama_report_finale()
     else:
-        log("Salvataggio Supabase e genera-report saltati a causa di errore in leggi_sheet.py.")
+        log("genera-report saltato a causa di errore in leggi_sheet.py.")
     log("=== CICLO REPORT completato ===")
+
+
+def leggi_kpi_da_supabase(commerciale):
+    """Legge i dati KPI di un commerciale direttamente da Supabase."""
+    try:
+        cliente_id = f"aloe-vera-pilot-{commerciale}"
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/canonical_data",
+            headers={
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            },
+            params={
+                "cliente": f"eq.{cliente_id}",
+                "fonte": "is.null",
+                "order": "creato_at.desc",
+                "limit": "1",
+                "select": "payload",
+            },
+            timeout=15,
+        )
+        if res.status_code == 200:
+            rows = res.json()
+            if rows:
+                return rows[0].get("payload", {}).get("KPI", {}).get("rows", [])
+    except Exception as e:
+        log(f"ERRORE lettura Supabase [{commerciale}]: {e}")
+    return []
 
 
 def controlla_kpi_ieri():
     log("=== CONTROLLO GIORNALIERO KPI ===")
     ieri = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
-    log(f"Ricerca dati KPI per la data: {ieri}")
+    log(f"Data controllata: {ieri}")
 
-    if not os.path.exists(JSON_FILE):
-        log("ERRORE: dati_canonici.json non trovato. Eseguo aggiornamento dati prima.")
-        esegui_script("leggi_sheet.py")
+    for commerciale in COMMERCIALI:
+        kpi_rows = leggi_kpi_da_supabase(commerciale)
 
-    try:
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            dati = json.load(f)
-    except Exception as e:
-        log(f"ERRORE lettura dati_canonici.json: {e}")
-        return
+        if not kpi_rows:
+            log(f"ALERT [{commerciale}]: nessun dato KPI trovato su Supabase.")
+            continue
 
-    kpi_rows = dati.get("KPI", {}).get("rows", [])
-    colonne_numeriche = [
-        "Novos e-mails enviados",
-        "Follow-ups enviados",
-        "Respostas recebidas",
-        "Ligações efetuadas",
-        "Reuniões agendadas",
-    ]
+        riga_ieri = next(
+            (r for r in kpi_rows if r.get("Data", "").strip() == ieri),
+            None
+        )
 
-    riga_ieri = None
-    for row in kpi_rows:
-        data_riga = row.get("Data", "").strip()
-        if data_riga == ieri:
-            riga_ieri = row
-            break
+        if riga_ieri is None:
+            log(f"ALERT [{commerciale}]: KPI non compilati ieri ({ieri}) - riga non trovata.")
+            log(f">>> ALERT: notifica {commerciale} e CEO <<<")
+            continue
 
-    if riga_ieri is None:
-        log(f"ALERT: KPI non compilati ieri ({ieri}) - riga non trovata nel foglio.")
-        log(">>> ALERT: KPI non compilati ieri - notifica collaboratore e CEO <<<")
-        return
+        valori_vuoti = all(
+            not riga_ieri.get(col, "").strip() or riga_ieri.get(col, "").strip() in ("0", "")
+            for col in COLONNE_NUMERICHE
+        )
 
-    valori_vuoti = all(
-        not riga_ieri.get(col, "").strip() or riga_ieri.get(col, "").strip() in ("0", "")
-        for col in colonne_numeriche
-    )
-
-    if valori_vuoti:
-        log(f"ALERT: KPI non compilati ieri ({ieri}) - tutti i valori sono vuoti o zero.")
-        log(">>> ALERT: KPI non compilati ieri - notifica collaboratore e CEO <<<")
-    else:
-        valori = {col: riga_ieri.get(col, "N/D") for col in colonne_numeriche}
-        log(f"KPI di ieri ({ieri}) presenti e compilati: {valori}")
+        if valori_vuoti:
+            log(f"ALERT [{commerciale}]: KPI di ieri ({ieri}) tutti vuoti o zero.")
+            log(f">>> ALERT: notifica {commerciale} e CEO <<<")
+        else:
+            valori = {col: riga_ieri.get(col, "N/D") for col in COLONNE_NUMERICHE}
+            log(f"OK [{commerciale}]: KPI di ieri ({ieri}) compilati: {valori}")
 
     log("=== CONTROLLO GIORNALIERO KPI completato ===")
 
@@ -147,17 +170,13 @@ def main():
     log("Controllo KPI giornaliero: ogni giorno alle 09:00")
     log("========================================")
 
-    # Primo run immediato all'avvio
     aggiorna_dati_e_report()
     controlla_kpi_ieri()
 
-    # Pianificazione report
     schedule.every().day.at("08:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("12:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("14:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("19:00").do(aggiorna_dati_e_report)
-
-    # Controllo KPI
     schedule.every().day.at("09:00").do(controlla_kpi_ieri)
 
     log("Scheduler in ascolto.")
