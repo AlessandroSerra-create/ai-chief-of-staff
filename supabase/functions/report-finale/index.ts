@@ -9,13 +9,22 @@ Deno.serve(async (req) => {
   const focus = body.focus ?? "analisi generale";
   const cliente = body.cliente ?? "aloe-vera-pilot";
 
+  // Per la config usiamo sempre il cliente base
+  const clienteConfig = "aloe-vera-pilot";
+
   try {
+    // Leggi i report del commerciale specifico
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/reports?cliente=eq.${cliente}&fonte=neq.finale&order=created_at.desc&limit=50`,
-      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      }
     );
     const reports = await res.json();
-    if (!reports.length) return new Response("Nessun report trovato", { status: 404 });
+    if (!reports.length) return new Response(`Nessun report trovato per ${cliente}`, { status: 404 });
 
     const byFonte: Record<string, string> = {};
     for (const r of reports) {
@@ -26,7 +35,10 @@ Deno.serve(async (req) => {
     const gmailReports: string[] = [];
     for (const [fonte, testo] of Object.entries(byFonte)) {
       if (fonte.startsWith("gmail_")) {
-        const emailName = fonte.replace("gmail_", "").replace(/_/g, ".").replace(".sorellebrasil.com", "@sorellebrasil.com");
+        const emailName = fonte
+          .replace("gmail_", "")
+          .replace(/_/g, ".")
+          .replace(".sorellebrasil.com", "@sorellebrasil.com");
         gmailReports.push(`### ${emailName}\n${testo}`);
       } else {
         mainReports.push(`## ${fonte.toUpperCase()}\n${testo}`);
@@ -38,22 +50,29 @@ Deno.serve(async (req) => {
       reportsText += `\n\n## COMUNICAÇÕES EMAIL\n${gmailReports.join("\n\n")}`;
     }
 
-    // Legge prompt e contesto da configurazioni
+    // Configurazioni — usa il cliente base (config condivisa tra commerciali)
     let contesto_azienda = "";
     let promptTemplate = "";
     let configContext = "";
 
     try {
       const configRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/configurazioni?cliente=eq.${cliente}&limit=1`,
-        { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
+        `${SUPABASE_URL}/rest/v1/configurazioni?cliente=eq.${clienteConfig}&limit=1`,
+        {
+          headers: {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+        }
       );
       const configRows = await configRes.json();
       if (configRows.length) {
         const config = configRows[0];
         contesto_azienda = config.contesto_azienda ?? "";
         promptTemplate = config.prompt_report_finale ?? "";
-        const focusList = Array.isArray(config.focus) ? config.focus.join(", ") : (config.focus ?? "");
+        const focusList = Array.isArray(config.focus)
+          ? config.focus.join(", ")
+          : (config.focus ?? "");
         const istruzione = config.istruzione_custom ?? "";
         if (focusList || istruzione) {
           configContext = `FOCO SOLICITADO PELO CEO: ${focusList}\nINSTRUÇÃO PERSONALIZADA: ${istruzione}\n\n`;
@@ -61,11 +80,17 @@ Deno.serve(async (req) => {
       }
     } catch (_) {}
 
+    // Contesto temporale — legge dal cliente specifico con fonte=is.null
     let temporalContext = "";
     try {
       const canonRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.${cliente}&order=created_at.desc&limit=1`,
-        { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } }
+        `${SUPABASE_URL}/rest/v1/canonical_data?cliente=eq.${cliente}&fonte=is.null&order=creato_at.desc&limit=1`,
+        {
+          headers: {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+        }
       );
       const canonRows = await canonRes.json();
       if (canonRows.length) {
@@ -77,41 +102,58 @@ Deno.serve(async (req) => {
             const [d, m, y] = s.split("/").map(Number);
             return new Date(y, m - 1, d).getTime();
           };
-          const daysDiff = Math.round((parseDate(dataOggi) - parseDate(ultimaDataKpi)) / 86400000);
+          const daysDiff = Math.round(
+            (parseDate(dataOggi) - parseDate(ultimaDataKpi)) / 86400000
+          );
           temporalContext = `CONTEXTO TEMPORAL: Hoje é ${dataOggi}. O último dia com dados preenchidos é ${ultimaDataKpi}. Passaram-se ${daysDiff} dias desde o último registro.\n\n`;
         }
       }
     } catch (_) {}
 
     // Costruisce il prompt finale
+    const nomeCommerciale = cliente.replace("aloe-vera-pilot-", "");
     let prompt = `${temporalContext}${configContext}`;
+
     if (promptTemplate) {
       prompt += promptTemplate
         .replace("{contesto_azienda}", contesto_azienda)
         .replace("{focus}", focus)
         .replace("{reportsText}", reportsText);
     } else {
-      // Fallback
-      prompt += `Você é o Chief of Staff de IA da Sorelle Brasil.\nO CEO pediu: "${focus}"\n\nRelatórios disponíveis:\n${reportsText}\n\nSeja direto e profissional.`;
+      prompt += `Você é o Chief of Staff de IA da Sorelle Brasil.\nRelatorio do comercial: ${nomeCommerciale}\nO CEO pediu: "${focus}"\n\nRelatórios disponíveis:\n${reportsText}\n\nSeja direto e profissional.`;
     }
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 6000, messages: [{ role: "user", content: prompt }] }),
+      headers: {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 6000,
+        messages: [{ role: "user", content: prompt }],
+      }),
     });
     const data = await anthropicRes.json();
     const testo = data.content?.[0]?.text ?? "Errore";
 
     await fetch(`${SUPABASE_URL}/rest/v1/reports`, {
       method: "POST",
-      headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
       body: JSON.stringify({ cliente, fonte: "finale", testo }),
     });
 
-    console.log("Report finale salvato.");
-    return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
-
+    console.log(`Report finale salvato per ${cliente}.`);
+    return new Response(JSON.stringify({ ok: true, cliente }), {
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (err) {
     console.error("Errore:", err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
