@@ -171,13 +171,13 @@ def main():
     log("Controllo KPI giornaliero: ogni giorno alle 09:00")
     log("========================================")
 
-    aggiorna_dati_e_report()
-    controlla_kpi_ieri()
-
+    # Pianificazione report - solo 4 volte al giorno
     schedule.every().day.at("08:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("12:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("14:00").do(aggiorna_dati_e_report)
     schedule.every().day.at("19:00").do(aggiorna_dati_e_report)
+
+    # Controllo KPI
     schedule.every().day.at("09:00").do(controlla_kpi_ieri)
 
     log("Scheduler in ascolto.")
