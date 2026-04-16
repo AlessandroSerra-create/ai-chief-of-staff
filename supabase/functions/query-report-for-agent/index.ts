@@ -68,37 +68,53 @@ Deno.serve(async (req) => {
 
     const fonti = detectFonti(question);
 
-    // Build the query: get latest report per fonte
-    let url: string;
-    if (fonti === "all") {
-      url = `${SUPABASE_URL}/rest/v1/reports?order=created_at.desc&limit=50&select=fonte,testo,created_at`;
-    } else {
-      const fontiFilter = fonti.map((f) => `"${f}"`).join(",");
-      url = `${SUPABASE_URL}/rest/v1/reports?fonte=in.(${fontiFilter})&order=created_at.desc&limit=50&select=fonte,testo,created_at`;
+    // Helper: build URL and fetch reports
+    const textFilters = "testo=not.is.null&testo=neq.&testo=neq.{}";
+    const supaHeaders = {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    };
+
+    function buildUrl(fonti: string[] | "all", extraFilters?: string): string {
+      const base = `${SUPABASE_URL}/rest/v1/reports`;
+      const params = [textFilters];
+      if (fonti !== "all") {
+        const likeConditions = fonti.map((f) => `fonte.like.${f}*`).join(",");
+        params.push(`or=(${likeConditions})`);
+      }
+      if (extraFilters) params.push(extraFilters);
+      params.push("order=created_at.desc", "limit=50", "select=fonte,testo,created_at");
+      return `${base}?${params.join("&")}`;
     }
 
-    const res = await fetch(url, {
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-    });
-
-    const rows = await res.json();
-
-    // Keep only the latest report per fonte
-    const byFonte: Record<string, { testo: string; created_at: string }> = {};
-    for (const r of rows) {
-      if (!byFonte[r.fonte]) {
-        byFonte[r.fonte] = { testo: r.testo, created_at: r.created_at };
+    function extractByFonte(rows: Array<{ fonte: string; testo: string; created_at: string }>) {
+      const byFonte: Record<string, { testo: string; created_at: string }> = {};
+      for (const r of rows) {
+        if (!byFonte[r.fonte] && r.testo && r.testo.length > 50) {
+          byFonte[r.fonte] = { testo: r.testo, created_at: r.created_at };
+        }
       }
+      return byFonte;
+    }
+
+    // 1. Try last 24 hours
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    let res = await fetch(buildUrl(fonti, `created_at=gte.${since}`), { headers: supaHeaders });
+    let rows = await res.json();
+    let byFonte = extractByFonte(rows);
+
+    // 2. Fallback: no time filter if nothing found
+    if (!Object.keys(byFonte).length) {
+      res = await fetch(buildUrl(fonti), { headers: supaHeaders });
+      rows = await res.json();
+      byFonte = extractByFonte(rows);
     }
 
     const fontiTrovate = Object.keys(byFonte);
 
     if (!fontiTrovate.length) {
       return new Response(
-        JSON.stringify({ risposta: "Nessun report trovato.", fonti: [], generato_at: null }),
+        JSON.stringify({ risposta: "Nessun report trovato.", fonti: [], generato_at: null, data_report: null }),
         {
           status: 404,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -120,6 +136,7 @@ Deno.serve(async (req) => {
         risposta: contenuto,
         fonti: fontiTrovate,
         generato_at: maxDate,
+        data_report: maxDate,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
