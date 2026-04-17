@@ -2,7 +2,7 @@ import json
 import os
 import requests
 import gspread
-from datetime import date
+from datetime import date, datetime
 from google.oauth2.service_account import Credentials
 
 SCOPES = [
@@ -88,7 +88,20 @@ def processa_commerciale(client, nome, sheet_id):
                     r for r in rows
                     if any(r.get(col, "").strip() not in ("", "0") for col in KPI_NUMERIC_COLS)
                 ]
-                rows = filtered[-14:]
+                oggi = date.today()
+                non_future = []
+                for r in filtered:
+                    d = r.get("Data", "").strip()
+                    if not d:
+                        continue
+                    try:
+                        parsed = datetime.strptime(d, "%d/%m/%Y").date()
+                    except ValueError:
+                        continue
+                    if parsed <= oggi:
+                        non_future.append(r)
+                print(f"  [KPI] {len(non_future)} righe dopo filtro data <= oggi")
+                rows = non_future[-14:]
                 print(f"  [KPI] {len(rows)} righe reali (dopo filtro su colonne B-F)")
 
                 ultima_data_kpi = ""
